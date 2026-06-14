@@ -6,7 +6,7 @@ on:
       deploy_ref:
         description: "Branch, tag, or commit SHA to deploy"
         required: true
-        default: "main"
+        default: "{{default_branch}}"
         type: string
       region:
         description: "AWS region"
@@ -26,22 +26,22 @@ on:
       server_name:
         description: "Dallinger EC2 server name"
         required: true
-        default: "empty-debug"
+        default: "{{repo_name}}-debug"
         type: string
       app_name:
         description: "PsyNet debug app name"
         required: true
-        default: "empty-debug"
+        default: "{{repo_name}}-debug"
         type: string
       dns_host:
         description: "DNS host for the debug server"
         required: true
-        default: "empty-debug.example.com"
+        default: "{{repo_name}}-debug.example.com"
         type: string
       ssh_key_name:
         description: "Dallinger EC2 SSH key name"
         required: true
-        default: "empty-ec2"
+        default: "{{repo_name}}-ec2"
         type: string
 
 permissions:
@@ -226,6 +226,41 @@ jobs:
             echo "No existing debug app '${{ inputs.app_name }}' was destroyed, or destroy reported a non-fatal failure."
           fi
 
+      - name: Configure hotair recruiter
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("config.txt")
+          text = path.read_text(encoding="utf-8")
+          lines = text.splitlines()
+
+          in_config = False
+          replaced = False
+          output = []
+          for line in lines:
+              stripped = line.strip()
+              if stripped.startswith("[") and stripped.endswith("]"):
+                  if in_config and not replaced:
+                      output.append("recruiter = hotair")
+                      replaced = True
+                  in_config = stripped == "[Config]"
+              if in_config and stripped.startswith("recruiter"):
+                  output.append("recruiter = hotair")
+                  replaced = True
+              else:
+                  output.append(line)
+
+          if in_config and not replaced:
+              output.append("recruiter = hotair")
+          elif not replaced:
+              output.extend(["", "[Config]", "recruiter = hotair"])
+
+          path.write_text("\n".join(output) + "\n", encoding="utf-8")
+          PY
+
       - name: Start hotair debug run
         run: |
           set -euo pipefail
@@ -234,8 +269,7 @@ jobs:
           psynet debug ssh \
             --app "${{ inputs.app_name }}" \
             --dns-host "${{ inputs.dns_host }}" \
-            --server "${{ inputs.dns_host }}" \
-            --recruiter hotair
+            --server "${{ inputs.dns_host }}"
 
       - name: Write deployment summary
         if: ${{ always() }}
